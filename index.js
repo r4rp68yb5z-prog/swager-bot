@@ -19,7 +19,7 @@ const client = new Client({
 
 // Personas autorizadas para DAR ROLES MANUALMENTE.
 //
-// En el hosting pondremos sus IDs en:
+// Se configuran en Railway mediante:
 // WHITELIST_IDS
 //
 // Ejemplo:
@@ -37,10 +37,9 @@ const WHITELIST = process.env.WHITELIST_IDS
 // BOTS AUTORIZADOS
 // =====================================
 
-// Puedes poner aquí los IDs de bots que tienen permiso
-// para otorgar roles manualmente.
+// Bots autorizados para otorgar roles manualmente.
 //
-// También puedes ponerlos en:
+// Se configuran en Railway mediante:
 // AUTHORIZED_BOT_IDS
 //
 // Ejemplo:
@@ -60,41 +59,14 @@ const AUTHORIZED_BOT_IDS = process.env.AUTHORIZED_BOT_IDS
 
 // SOLO estos roles estarán protegidos.
 //
-// IMPORTANTE:
-// Pon aquí los IDs de los roles que quieres controlar.
+// Se configuran en Railway mediante:
+// PROTECTED_ROLE_IDS
 //
 // Ejemplo:
-//
-// const PROTECTED_ROLE_IDS = [
-//   "123456789012345678",
-//   "987654321098765432"
-// ];
+// 123456789012345678,987654321098765432
 
 const PROTECTED_ROLE_IDS = process.env.PROTECTED_ROLE_IDS
   ? process.env.PROTECTED_ROLE_IDS
-      .split(",")
-      .map(id => id.trim())
-      .filter(Boolean)
-  : [];
-
-
-// =====================================
-// ROLES QUE SE QUITARÁN COMO CASTIGO
-// =====================================
-
-// Cuando alguien NO autorizado dé manualmente
-// un rol protegido, estos son los roles que
-// se le quitarán al infractor.
-//
-// Ejemplo:
-//
-// const PUNISHMENT_ROLE_IDS = [
-//   "123456789012345678",
-//   "987654321098765432"
-// ];
-
-const PUNISHMENT_ROLE_IDS = process.env.PUNISHMENT_ROLE_IDS
-  ? process.env.PUNISHMENT_ROLE_IDS
       .split(",")
       .map(id => id.trim())
       .filter(Boolean)
@@ -124,7 +96,7 @@ client.once("ready", () => {
 // FUNCIONES AUXILIARES
 // =====================================
 
-// Comprobar si una persona está autorizada
+// Comprobar si una persona/bot está autorizado
 function isAuthorized(userId) {
   return (
     WHITELIST.includes(userId) ||
@@ -133,20 +105,34 @@ function isAuthorized(userId) {
 }
 
 
-// Buscar un miembro por ID, mención o nombre
+// =====================================
+// BUSCAR MIEMBRO
+// =====================================
+
+// Busca por:
+// - Mención
+// - ID
+// - Username
+// - Display name
+
 async function findMember(guild, input) {
   input = input.trim();
 
   // Mención: <@123456789>
+  // Mención con nickname: <@!123456789>
   const mentionMatch = input.match(/^<@!?(\d+)>$/);
 
   if (mentionMatch) {
-    return guild.members.fetch(mentionMatch[1]).catch(() => null);
+    return guild.members
+      .fetch(mentionMatch[1])
+      .catch(() => null);
   }
 
   // ID
   if (/^\d{17,20}$/.test(input)) {
-    return guild.members.fetch(input).catch(() => null);
+    return guild.members
+      .fetch(input)
+      .catch(() => null);
   }
 
   // Nombre exacto / username
@@ -166,7 +152,15 @@ async function findMember(guild, input) {
 }
 
 
-// Buscar un rol por ID, mención o nombre
+// =====================================
+// BUSCAR ROL
+// =====================================
+
+// Busca por:
+// - Mención
+// - ID
+// - Nombre
+
 function findRole(guild, input) {
   input = input.trim();
 
@@ -182,6 +176,7 @@ function findRole(guild, input) {
     return guild.roles.cache.get(input) || null;
   }
 
+  // Nombre
   const lower = input.toLowerCase();
 
   return (
@@ -204,6 +199,8 @@ function findRole(guild, input) {
 //
 // ,r 123456789012345678 987654321098765432
 //
+// ,r 987654321098765432 123456789012345678
+//
 // El bot detectará automáticamente cuál
 // argumento es el usuario y cuál es el rol.
 //
@@ -211,8 +208,11 @@ function findRole(guild, input) {
 client.on("messageCreate", async message => {
   try {
     if (!message.guild) return;
+
+    // No procesar comandos enviados por bots
     if (message.author.bot) return;
 
+    // Comprobar prefijo
     if (!message.content.toLowerCase().startsWith(PREFIX + "r")) {
       return;
     }
@@ -229,42 +229,62 @@ client.on("messageCreate", async message => {
     const first = args[1];
     const second = args[2];
 
-    const firstMember = await findMember(message.guild, first);
-    const secondMember = await findMember(message.guild, second);
+    // Intentar identificar ambos como miembro
+    const firstMember = await findMember(
+      message.guild,
+      first
+    );
 
-    const firstRole = findRole(message.guild, first);
-    const secondRole = findRole(message.guild, second);
+    const secondMember = await findMember(
+      message.guild,
+      second
+    );
+
+    // Intentar identificar ambos como rol
+    const firstRole = findRole(
+      message.guild,
+      first
+    );
+
+    const secondRole = findRole(
+      message.guild,
+      second
+    );
 
     let targetMember = null;
     let targetRole = null;
 
-    // -----------------------------
+
+    // =====================================
     // ,r ROL USUARIO
-    // -----------------------------
+    // =====================================
 
     if (firstRole && secondMember) {
       targetRole = firstRole;
       targetMember = secondMember;
     }
 
-    // -----------------------------
+
+    // =====================================
     // ,r USUARIO ROL
-    // -----------------------------
+    // =====================================
 
     else if (firstMember && secondRole) {
       targetMember = firstMember;
       targetRole = secondRole;
     }
 
-    // -----------------------------
-    // No se pudo determinar
-    // -----------------------------
+
+    // =====================================
+    // NO SE PUDO DETERMINAR
+    // =====================================
 
     else {
       return message.reply(
         "❌ No pude identificar correctamente el usuario y el rol."
       );
     }
+
 
     // =====================================
     // COMPROBAR QUE EL ROL ESTÉ PROTEGIDO
@@ -276,15 +296,20 @@ client.on("messageCreate", async message => {
       );
     }
 
-    // =====================================
-    // COMPROBAR AUTORIZACIÓN DEL COMANDO
-    // =====================================
 
-    // IMPORTANTE:
-    // Tanto alguien de WL como alguien FUERA de WL
-    // puede utilizar ,r.
+    // =====================================
+    // IMPORTANTE
+    // =====================================
     //
-    // Por eso NO comprobamos WHITELIST aquí.
+    // NO comprobamos WL aquí.
+    //
+    // Tanto personas en WL como personas fuera
+    // de WL pueden utilizar ,r.
+    //
+    // La protección manual se controla mediante
+    // el Audit Log.
+    //
+
 
     // =====================================
     // COMPROBAR JERARQUÍA
@@ -296,6 +321,7 @@ client.on("messageCreate", async message => {
       );
     }
 
+
     // =====================================
     // EVITAR DAR UN ROL QUE YA TIENE
     // =====================================
@@ -306,6 +332,7 @@ client.on("messageCreate", async message => {
       );
     }
 
+
     // =====================================
     // DAR EL ROL
     // =====================================
@@ -315,16 +342,21 @@ client.on("messageCreate", async message => {
       `Rol otorgado mediante ${PREFIX}r por ${message.author.tag}`
     );
 
+
     console.log(
       `✅ ${message.author.tag} otorgó "${targetRole.name}" a ${targetMember.user.tag} mediante ,r`
     );
+
 
     return message.reply(
       `✅ Se otorgó **${targetRole.name}** a ${targetMember}.`
     );
 
   } catch (error) {
-    console.error("❌ Error en comando ,r:", error);
+    console.error(
+      "❌ Error en comando ,r:",
+      error
+    );
 
     if (message.guild) {
       message.reply(
@@ -350,45 +382,7 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
       role => !oldMember.roles.cache.has(role.id)
     );
 
-    if (addedRoles.size === 0) return;
-
-
-    // =====================================
-    // ESPERAR AL AUDIT LOG
-    // =====================================
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-
-    // =====================================
-    // BUSCAR QUIÉN HIZO EL CAMBIO
-    // =====================================
-
-    const auditLogs = await newMember.guild.fetchAuditLogs({
-      type: AuditLogEvent.MemberRoleUpdate,
-      limit: 10
-    });
-
-    const entry = auditLogs.entries.find(entry =>
-      entry.target?.id === newMember.id &&
-      Date.now() - entry.createdTimestamp < 10000
-    );
-
-    if (!entry || !entry.executor) {
-      console.log(
-        "⚠️ No se pudo identificar quién otorgó el rol."
-      );
-      return;
-    }
-
-    const executor = entry.executor;
-
-
-    // =====================================
-    // SI FUE EL PROPIO BOT
-    // =====================================
-
-    if (executor.id === client.user.id) {
+    if (addedRoles.size === 0) {
       return;
     }
 
@@ -397,8 +391,8 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     // VER SI SE AGREGÓ UN ROL PROTEGIDO
     // =====================================
 
-    const protectedRolesAdded = addedRoles.filter(role =>
-      PROTECTED_ROLE_IDS.includes(role.id)
+    const protectedRolesAdded = addedRoles.filter(
+      role => PROTECTED_ROLE_IDS.includes(role.id)
     );
 
     if (protectedRolesAdded.size === 0) {
@@ -407,7 +401,63 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
 
     // =====================================
-    // COMPROBAR WL
+    // ESPERAR AL AUDIT LOG
+    // =====================================
+
+    // Discord puede tardar un momento en registrar
+    // la acción en el Audit Log.
+
+    await new Promise(resolve =>
+      setTimeout(resolve, 1500)
+    );
+
+
+    // =====================================
+    // BUSCAR QUIÉN HIZO EL CAMBIO
+    // =====================================
+
+    const auditLogs =
+      await newMember.guild.fetchAuditLogs({
+        type: AuditLogEvent.MemberRoleUpdate,
+        limit: 10
+      });
+
+
+    // Buscar la entrada correspondiente al miembro
+    // actualizado y reciente.
+
+    const entry = auditLogs.entries.find(entry =>
+      entry.target?.id === newMember.id &&
+      Date.now() - entry.createdTimestamp < 10000
+    );
+
+
+    if (!entry || !entry.executor) {
+      console.log(
+        "⚠️ No se pudo identificar quién otorgó el rol protegido."
+      );
+
+      return;
+    }
+
+
+    const executor = entry.executor;
+
+
+    // =====================================
+    // SI FUE EL PROPIO BOT
+    // =====================================
+
+    // Si Swagger otorgó el rol mediante ,r,
+    // no debe castigarse a sí mismo.
+
+    if (executor.id === client.user.id) {
+      return;
+    }
+
+
+    // =====================================
+    // COMPROBAR AUTORIZACIÓN
     // =====================================
 
     if (isAuthorized(executor.id)) {
@@ -429,12 +479,14 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
 
     // =====================================
-    // QUITAR EL ROL AL RECEPTOR
+    // QUITAR EL ROL PROTEGIDO AL RECEPTOR
     // =====================================
 
     for (const role of protectedRolesAdded.values()) {
 
-      if (role.id === newMember.guild.id) continue;
+      if (role.id === newMember.guild.id) {
+        continue;
+      }
 
       if (!role.editable) {
         console.log(
@@ -462,9 +514,11 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     // BUSCAR AL INFRACTOR
     // =====================================
 
-    const offender = await newMember.guild.members
-      .fetch(executor.id)
-      .catch(() => null);
+    const offender =
+      await newMember.guild.members
+        .fetch(executor.id)
+        .catch(() => null);
+
 
     if (!offender) {
       console.log(
@@ -489,44 +543,79 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
 
     // =====================================
-    // CASTIGAR AL INFRACTOR
+    // QUITAR TODOS LOS ROLES POSIBLES
     // =====================================
 
-    for (const roleId of PUNISHMENT_ROLE_IDS) {
+    // Discord NO permite que el bot quite:
+    //
+    // - @everyone
+    // - roles administrados por integraciones/bots
+    // - roles que estén por encima o al mismo nivel
+    //   que el rol más alto del bot
+    //
+    // Por eso solamente seleccionamos roles que
+    // Swagger realmente puede gestionar.
 
-      const punishmentRole =
-        offender.guild.roles.cache.get(roleId);
+    const removableRoles = offender.roles.cache.filter(role =>
+      role.id !== newMember.guild.id &&
+      !role.managed &&
+      role.editable
+    );
 
-      if (!punishmentRole) continue;
 
-      if (punishmentRole.managed) continue;
+    // =====================================
+    // SI NO TIENE ROLES QUITABLES
+    // =====================================
 
-      if (!punishmentRole.editable) {
-        console.log(
-          `⚠️ No puedo quitar el rol de castigo "${punishmentRole.name}".`
-        );
+    if (removableRoles.size === 0) {
 
-        continue;
-      }
+      console.log(
+        `ℹ️ ${offender.user.tag} no tiene roles que Swagger pueda quitar.`
+      );
 
-      if (offender.roles.cache.has(punishmentRole.id)) {
+      return;
+    }
+
+
+    // =====================================
+    // QUITAR TODOS LOS ROLES
+    // =====================================
+
+    for (const role of removableRoles.values()) {
+
+      try {
 
         await offender.roles.remove(
-          punishmentRole,
+          role,
           "Castigo por otorgar manualmente un rol protegido sin estar en WL"
         );
 
         console.log(
-          `🚨 Se quitó "${punishmentRole.name}" a ${offender.user.tag}.`
+          `🚨 Se quitó "${role.name}" a ${offender.user.tag}.`
         );
+
+      } catch (error) {
+
+        console.error(
+          `❌ No se pudo quitar "${role.name}" a ${offender.user.tag}:`,
+          error.message
+        );
+
       }
     }
 
+
+    console.log(
+      `🚨 Castigo completado para ${offender.user.tag}.`
+    );
+
   } catch (error) {
+
     console.error(
       "❌ Error en protección de roles:",
       error
     );
+
   }
 });
 
